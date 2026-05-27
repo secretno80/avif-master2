@@ -1,0 +1,26 @@
+# Build output
+build/
+Output/
+
+# Inno Setup compiled output
+*.exe
+!lib/*.exe
+
+# Object files
+build/resource.o
+
+# VS Code
+.vscode/
+
+# Windows thumbnails
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+*.avifmaster.log
+
+# Temporary files
+*.tmp
+*.temp

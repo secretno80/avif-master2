@@ -192,6 +192,11 @@ Full license texts are available in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENS
 | libyuv  | rev.1922 | BSD 3-Clause | YUV color space processing (in libavif)  |
 | libwebp | (source) | BSD 3-Clause | WebP support (`Dependencies/libwebp/`)   |
 
+## Credits
+
+- Project owner / distributor: secretno80
+- Development assistance: GitHub Copilot, Claude
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

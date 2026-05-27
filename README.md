@@ -194,8 +194,9 @@ Full license texts are available in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENS
 
 ## Credits
 
-- Project owner / distributor: secretno80
-- Development assistance: GitHub Copilot, Claude
+- Repository publishing account: secretno80
+- Most implementation and documentation were produced with AI assistance.
+- AI tools used: GitHub Copilot, Claude
 
 ## License
 

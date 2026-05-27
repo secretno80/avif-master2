@@ -95,7 +95,7 @@ bool g_autoClose = false;
 bool g_useCustomOutputDir = false;
 bool g_keepModifiedTime = false;
 std::wstring g_customOutputDir;
-std::wstring g_uiLanguage = L"korean";
+std::wstring g_uiLanguage = L"english";
 HFONT g_hFont = NULL;
 
 const wchar_t* REG_KEY = L"Software\\AVIFMaster2";
@@ -140,9 +140,59 @@ const wchar_t* UiText(const wchar_t* ko, const wchar_t* en) {
     return IsEnglishUiLanguage() ? en : ko;
 }
 
+std::wstring DetectSystemDefaultLanguage() {
+    const LANGID langId = GetUserDefaultUILanguage();
+    return (PRIMARYLANGID(langId) == LANG_KOREAN) ? L"korean" : L"english";
+}
+
+std::wstring GetCurrentExecutablePath() {
+    wchar_t modulePath[MAX_PATH] = { 0 };
+    if (GetModuleFileNameW(NULL, modulePath, MAX_PATH) == 0) {
+        return L"";
+    }
+    return std::wstring(modulePath);
+}
+
+void SetRegStringValue(HKEY root, const std::wstring& subkey, const wchar_t* valueName, const std::wstring& value) {
+    HKEY hKey = NULL;
+    if (RegCreateKeyExW(root, subkey.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) != ERROR_SUCCESS) {
+        return;
+    }
+
+    RegSetValueExW(hKey, valueName, 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(value.c_str()),
+        static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+}
+
+void UpdatePerUserContextMenuText() {
+    const std::wstring exePath = GetCurrentExecutablePath();
+    if (exePath.empty()) {
+        return;
+    }
+
+    const std::wstring menuText = UiText(L"AVIF-Master로 고속 변환", L"Convert with AVIF-Master");
+    const std::wstring iconValue = L"\"" + exePath + L"\"";
+    const std::wstring cmdValue = L"\"" + exePath + L"\" \"%1\"";
+
+    const std::wstring baseKeys[] = {
+        L"Software\\Classes\\*\\shell\\AVIFMaster",
+        L"Software\\Classes\\Directory\\shell\\AVIFMaster",
+        L"Software\\Classes\\Folder\\shell\\AVIFMaster",
+        L"Software\\Classes\\Directory\\Background\\shell\\AVIFMaster"
+    };
+
+    for (const auto& baseKey : baseKeys) {
+        SetRegStringValue(HKEY_CURRENT_USER, baseKey, NULL, menuText);
+        SetRegStringValue(HKEY_CURRENT_USER, baseKey, L"Icon", iconValue);
+        SetRegStringValue(HKEY_CURRENT_USER, baseKey + L"\\command", NULL, cmdValue);
+    }
+}
+
 void LoadUiLanguagePreference() {
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        g_uiLanguage = DetectSystemDefaultLanguage();
         return;
     }
 
@@ -155,6 +205,8 @@ void LoadUiLanguagePreference() {
         } else {
             g_uiLanguage = L"korean";
         }
+    } else {
+        g_uiLanguage = DetectSystemDefaultLanguage();
     }
     RegCloseKey(hKey);
 }
@@ -760,6 +812,9 @@ void SaveSettings(HWND hwnd) {
         g_uiLanguage = langValue;
     }
     RegCloseKey(hKey);
+
+    // Keep Explorer context menu text in sync with the saved UI language.
+    UpdatePerUserContextMenuText();
 }
 
 void LoadSettings(HWND hwnd) {
@@ -2156,6 +2211,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             // Restore saved settings
             LoadSettings(hwnd);
+            UpdatePerUserContextMenuText();
             UpdateOutputDirUiState(hwnd);
 
             HWND hHeader = ListView_GetHeader(hListView);

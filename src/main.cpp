@@ -55,6 +55,7 @@ const int ID_REGISTER_PANEL = 1020;
 const int ID_REGISTER_TEXT = 1021;
 const int ID_REGISTER_PROGRESS = 1022;
 const int ID_CHK_KEEP_CREATION_TIME = 1023;
+const int ID_CMB_LANG = 1024;
 
 struct FileItem {
     std::wstring path;
@@ -94,6 +95,7 @@ bool g_autoClose = false;
 bool g_useCustomOutputDir = false;
 bool g_keepModifiedTime = false;
 std::wstring g_customOutputDir;
+std::wstring g_uiLanguage = L"korean";
 HFONT g_hFont = NULL;
 
 const wchar_t* REG_KEY = L"Software\\AVIFMaster2";
@@ -129,6 +131,33 @@ struct RegisterProgressPayload {
 };
 
 void WriteLogLineW(HANDLE hLogFile, const std::wstring& line);
+
+bool IsEnglishUiLanguage() {
+    return _wcsicmp(g_uiLanguage.c_str(), L"english") == 0;
+}
+
+const wchar_t* UiText(const wchar_t* ko, const wchar_t* en) {
+    return IsEnglishUiLanguage() ? en : ko;
+}
+
+void LoadUiLanguagePreference() {
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        return;
+    }
+
+    wchar_t langBuf[32] = { 0 };
+    DWORD langType = REG_SZ;
+    DWORD langSize = sizeof(langBuf);
+    if (RegQueryValueExW(hKey, L"UILanguage", NULL, &langType, (BYTE*)langBuf, &langSize) == ERROR_SUCCESS) {
+        if (_wcsicmp(langBuf, L"english") == 0) {
+            g_uiLanguage = L"english";
+        } else {
+            g_uiLanguage = L"korean";
+        }
+    }
+    RegCloseKey(hKey);
+}
 
 bool IsAvifMasterTempArtifactName(const std::wstring& name) {
     return name.rfind(TEMP_ARTIFACT_PREFIX, 0) == 0;
@@ -502,7 +531,7 @@ void UpdateOutputDirUiState(HWND hwnd) {
 bool BrowseForFolder(HWND owner, std::wstring& selectedPath) {
     BROWSEINFOW bi = { 0 };
     bi.hwndOwner = owner;
-    bi.lpszTitle = L"출력 폴더를 선택하세요";
+    bi.lpszTitle = UiText(L"출력 폴더를 선택하세요", L"Select output folder");
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
 
     PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
@@ -721,6 +750,15 @@ void SaveSettings(HWND hwnd) {
     GetWindowTextW(GetDlgItem(hwnd, ID_EDT_OUTPUT_DIR), pathBuf, MAX_PATH);
     RegSetValueExW(hKey, L"CustomOutputDir", 0, REG_SZ, (const BYTE*)pathBuf,
         (DWORD)((wcslen(pathBuf) + 1) * sizeof(wchar_t)));
+
+    HWND hLang = GetDlgItem(hwnd, ID_CMB_LANG);
+    if (hLang) {
+        const int langSel = (int)SendMessageW(hLang, CB_GETCURSEL, 0, 0);
+        const wchar_t* langValue = (langSel == 1) ? L"english" : L"korean";
+        RegSetValueExW(hKey, L"UILanguage", 0, REG_SZ, (const BYTE*)langValue,
+            (DWORD)((wcslen(langValue) + 1) * sizeof(wchar_t)));
+        g_uiLanguage = langValue;
+    }
     RegCloseKey(hKey);
 }
 
@@ -769,6 +807,11 @@ void LoadSettings(HWND hwnd) {
     DWORD outDirType = REG_SZ;
     if (RegQueryValueExW(hKey, L"CustomOutputDir", NULL, &outDirType, (BYTE*)outDir, &outDirSize) == ERROR_SUCCESS && outDir[0] != L'\0') {
         SetWindowTextW(GetDlgItem(hwnd, ID_EDT_OUTPUT_DIR), outDir);
+    }
+
+    HWND hLang = GetDlgItem(hwnd, ID_CMB_LANG);
+    if (hLang) {
+        SendMessageW(hLang, CB_SETCURSEL, IsEnglishUiLanguage() ? 1 : 0, 0);
     }
     RegCloseKey(hKey);
 }
@@ -992,13 +1035,17 @@ std::wstring FindExistingLogPath(const FileItem& item) {
 void OpenFailureLogForItem(HWND hwnd, const FileItem& item) {
     std::wstring logToOpen = FindExistingLogPath(item);
     if (logToOpen.empty()) {
-        MessageBoxW(hwnd, L"열 수 있는 로그 파일을 찾지 못했습니다.", L"로그 없음", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(hwnd,
+            UiText(L"열 수 있는 로그 파일을 찾지 못했습니다.", L"No log file could be found."),
+            UiText(L"로그 없음", L"No Log"), MB_OK | MB_ICONINFORMATION);
         return;
     }
 
     HINSTANCE result = ShellExecuteW(hwnd, L"open", logToOpen.c_str(), NULL, NULL, SW_SHOWNORMAL);
     if ((INT_PTR)result <= 32) {
-        MessageBoxW(hwnd, L"로그 파일을 열지 못했습니다.", L"오류", MB_OK | MB_ICONERROR);
+        MessageBoxW(hwnd,
+            UiText(L"로그 파일을 열지 못했습니다.", L"Failed to open log file."),
+            UiText(L"오류", L"Error"), MB_OK | MB_ICONERROR);
     }
 }
 
@@ -1960,7 +2007,9 @@ void MasterWorkerThread() {
     } else if (!stoppedByUser && !closeAfterRun) {
         MessageBoxW(NULL, L"모든 변환 작업이 완료되었습니다.", L"알림", MB_OK | MB_ICONINFORMATION);
     } else if (stoppedByUser && !closeAfterRun) {
-        MessageBoxW(NULL, L"변환 작업이 사용자 요청으로 중지되었습니다.", L"알림", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(NULL,
+            UiText(L"변환 작업이 사용자 요청으로 중지되었습니다.", L"Conversion was stopped by user request."),
+            UiText(L"알림", L"Notice"), MB_OK | MB_ICONINFORMATION);
     }
 }
 
@@ -1968,6 +2017,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch(msg) {
         case WM_CREATE: {
             g_hwnd = hwnd;
+            LoadUiLanguagePreference();
             INITCOMMONCONTROLSEX icex;
             icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
             icex.dwICC = ICC_LISTVIEW_CLASSES;
@@ -1992,7 +2042,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             
             LVCOLUMNW lvc = {0};
             lvc.mask = LVCF_TEXT | LVCF_WIDTH;
-            const wchar_t* cols[] = { L"이름", L"형식", L"원본 용량", L"상태", L"결과 용량", L"압축률", L"소요 시간(EST)" };
+            const wchar_t* cols[] = {
+                UiText(L"이름", L"Name"),
+                UiText(L"형식", L"Type"),
+                UiText(L"원본 용량", L"Original Size"),
+                UiText(L"상태", L"Status"),
+                UiText(L"결과 용량", L"Result Size"),
+                UiText(L"압축률", L"Reduction"),
+                UiText(L"소요 시간(EST)", L"Elapsed (EST)")
+            };
             int widths[] = { 180, 50, 80, 120, 80, 80, 120 };
             for(int i = 0; i < 7; ++i) {
                 lvc.pszText = (LPWSTR)cols[i];
@@ -2001,28 +2059,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             
             // Options Group
-            CreateWindowExW(0, L"BUTTON", L"설정", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+            CreateWindowExW(0, L"BUTTON", UiText(L"설정", L"Settings"), WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
                 10, 380, 760, 175, hwnd, NULL, GetModuleHandle(NULL), NULL);
-            
-            CreateWindowExW(0, L"STATIC", L"품질:", WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
+
+            CreateWindowExW(0, L"STATIC", UiText(L"언어:", L"Language:"), WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
                 20, 400, 45, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            HWND hCmbLang = CreateWindowExW(0, L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                65, 395, 120, 100, hwnd, (HMENU)ID_CMB_LANG, GetModuleHandle(NULL), NULL);
+            SendMessageW(hCmbLang, CB_ADDSTRING, 0, (LPARAM)L"한국어");
+            SendMessageW(hCmbLang, CB_ADDSTRING, 0, (LPARAM)L"English");
+            SendMessageW(hCmbLang, CB_SETCURSEL, IsEnglishUiLanguage() ? 1 : 0, 0);
+            
+            CreateWindowExW(0, L"STATIC", UiText(L"품질:", L"Quality:"), WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
+                200, 400, 45, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             HWND hCmbQuality = CreateWindowExW(0, L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                65, 395, 120, 100, hwnd, (HMENU)ID_CMB_QUALITY, GetModuleHandle(NULL), NULL);
-            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)L"Fast (낮은 압축률)");
-            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)L"Normal (균형)");
-            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)L"High ( 높은 압축률)");
+                245, 395, 120, 100, hwnd, (HMENU)ID_CMB_QUALITY, GetModuleHandle(NULL), NULL);
+            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)UiText(L"Fast (낮은 압축률)", L"Fast (Lower compression)"));
+            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)UiText(L"Normal (균형)", L"Normal (Balanced)"));
+            SendMessageW(hCmbQuality, CB_ADDSTRING, 0, (LPARAM)UiText(L"High ( 높은 압축률)", L"High (Higher compression)"));
             SendMessageW(hCmbQuality, CB_SETCURSEL, 1, 0);
 
-            CreateWindowExW(0, L"STATIC", L"하드웨어:", WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
-                200, 400, 65, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            CreateWindowExW(0, L"STATIC", UiText(L"하드웨어:", L"Hardware:"), WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
+                380, 400, 65, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             HWND hCmbHw = CreateWindowExW(0, L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
-                270, 395, 100, 100, hwnd, (HMENU)ID_CMB_HW, GetModuleHandle(NULL), NULL);
+                450, 395, 100, 100, hwnd, (HMENU)ID_CMB_HW, GetModuleHandle(NULL), NULL);
             SendMessageW(hCmbHw, CB_ADDSTRING, 0, (LPARAM)L"CPU Only");
             SendMessageW(hCmbHw, CB_ADDSTRING, 0, (LPARAM)L"CPU + GPU");
             SendMessageW(hCmbHw, CB_SETCURSEL, 0, 0);
 
-            CreateWindowExW(0, L"STATIC", L"동시작업:", WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
-                385, 400, 65, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            CreateWindowExW(0, L"STATIC", UiText(L"동시작업:", L"Jobs:"), WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
+                565, 400, 55, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             
             unsigned int numCores = std::thread::hardware_concurrency();
             if (numCores == 0) numCores = 4;
@@ -2035,45 +2101,45 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int defaultThreads = (numCores >= 16) ? 4 : ((numCores >= 8) ? 4 : 2);
             
             HWND hEdtJobs = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", std::to_wstring(defaultJobs).c_str(), WS_CHILD | WS_VISIBLE | ES_NUMBER,
-                450, 395, 30, 25, hwnd, (HMENU)ID_EDT_JOBS, GetModuleHandle(NULL), NULL);
+                620, 395, 30, 25, hwnd, (HMENU)ID_EDT_JOBS, GetModuleHandle(NULL), NULL);
             
-            CreateWindowExW(0, L"STATIC", L"스레드:", WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
-                495, 400, 55, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            CreateWindowExW(0, L"STATIC", UiText(L"스레드:", L"Threads:"), WS_CHILD | WS_VISIBLE | SS_NOPREFIX,
+                655, 400, 60, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             HWND hEdtThreads = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", std::to_wstring(defaultThreads).c_str(), WS_CHILD | WS_VISIBLE | ES_NUMBER,
-                550, 395, 30, 25, hwnd, (HMENU)ID_EDT_THREADS, GetModuleHandle(NULL), NULL);
+                715, 395, 35, 25, hwnd, (HMENU)ID_EDT_THREADS, GetModuleHandle(NULL), NULL);
             
-            HWND hChkSimd = CreateWindowExW(0, L"BUTTON", L"SIMD/Assembly 최적화 사용", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            HWND hChkSimd = CreateWindowExW(0, L"BUTTON", UiText(L"SIMD/Assembly 최적화 사용", L"Use SIMD/Assembly optimization"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 20, 435, 210, 20, hwnd, (HMENU)ID_CHK_SIMD, GetModuleHandle(NULL), NULL);
             SendMessageW(hChkSimd, BM_SETCHECK, BST_CHECKED, 0);
 
-            CreateWindowExW(0, L"BUTTON", L"기존 파일 제거", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            CreateWindowExW(0, L"BUTTON", UiText(L"기존 파일 제거", L"Delete original files"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 240, 435, 100, 20, hwnd, (HMENU)ID_CHK_DEL_ORIG, GetModuleHandle(NULL), NULL);
-            CreateWindowExW(0, L"BUTTON", L"작업완료 시 창닫기", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            CreateWindowExW(0, L"BUTTON", UiText(L"작업완료 시 창닫기", L"Close window on completion"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 350, 435, 160, 20, hwnd, (HMENU)ID_CHK_AUTO_CLOSE, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"선택 삭제 (DEL)", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"선택 삭제 (DEL)", L"Delete selected (DEL)"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 620, 435, 130, 25, hwnd, (HMENU)ID_BTN_DEL, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"설정 저장", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"설정 저장", L"Save settings"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 20, 465, 110, 25, hwnd, (HMENU)ID_BTN_SAVE_SETTINGS, GetModuleHandle(NULL), NULL);
-            CreateWindowExW(0, L"BUTTON", L"완료 목록 삭제", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"완료 목록 삭제", L"Delete completed"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 140, 465, 120, 25, hwnd, (HMENU)ID_BTN_DEL_COMPLETED, GetModuleHandle(NULL), NULL);
-            CreateWindowExW(0, L"BUTTON", L"실패 목록 삭제", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"실패 목록 삭제", L"Delete failed"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 270, 465, 120, 25, hwnd, (HMENU)ID_BTN_DEL_FAILED, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"특정 폴더에 저장", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            CreateWindowExW(0, L"BUTTON", UiText(L"특정 폴더에 저장", L"Save to specific folder"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 20, 495, 150, 22, hwnd, (HMENU)ID_CHK_CUSTOM_OUTPUT, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"파일수정일유지", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            CreateWindowExW(0, L"BUTTON", UiText(L"파일수정일유지", L"Keep modified date"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 180, 495, 130, 22, hwnd, (HMENU)ID_CHK_KEEP_CREATION_TIME, GetModuleHandle(NULL), NULL);
 
             CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY,
                 20, 522, 640, 24, hwnd, (HMENU)ID_EDT_OUTPUT_DIR, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"폴더 선택", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"폴더 선택", L"Browse"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 670, 522, 80, 24, hwnd, (HMENU)ID_BTN_OUTPUT_BROWSE, GetModuleHandle(NULL), NULL);
 
-            CreateWindowExW(0, L"BUTTON", L"변환 시작", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            CreateWindowExW(0, L"BUTTON", UiText(L"변환 시작", L"Start conversion"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 10, 560, 760, 40, hwnd, (HMENU)ID_BTN_CONVERT, GetModuleHandle(NULL), NULL);
 
             g_hProgress = CreateWindowExW(0, PROGRESS_CLASSW, L"",
@@ -2188,7 +2254,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_APP_CONVERT_FINISHED: {
-            SetConvertButtonText(hwnd, L"변환 시작");
+            SetConvertButtonText(hwnd, UiText(L"변환 시작", L"Start conversion"));
             const bool removeCompleted = g_pendingDeleteCompleted.exchange(false);
             const bool removeFailed = g_pendingDeleteFailed.exchange(false);
             if (removeCompleted || removeFailed) {
@@ -2221,7 +2287,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (LOWORD(wParam) == ID_BTN_CONVERT) {
                 if (g_isConverting.load()) {
                     g_stopRequested.store(true);
-                    SetConvertButtonText(hwnd, L"중지 요청중...");
+                    SetConvertButtonText(hwnd, UiText(L"중지 요청중...", L"Stopping..."));
                     MarkActiveItemsAsUserStopped();
                     CleanupActiveTempWorkDirs();
                     InvalidateRect(hListView, NULL, FALSE);
@@ -2231,7 +2297,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_stopRequested.store(false);
                 g_isConverting.store(true);
                 g_closeAfterCurrentRun.store(false);
-                SetConvertButtonText(hwnd, L"변환 중지");
+                SetConvertButtonText(hwnd, UiText(L"변환 중지", L"Stop conversion"));
 
                 unsigned long long totalBytes = 0;
                 {
@@ -2273,9 +2339,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
 
                 if (g_useCustomOutputDir && g_customOutputDir.empty()) {
-                    MessageBoxW(hwnd, L"특정 폴더 저장을 사용하려면 출력 폴더를 선택하세요.", L"알림", MB_OK | MB_ICONWARNING);
+                    MessageBoxW(hwnd,
+                        UiText(L"특정 폴더 저장을 사용하려면 출력 폴더를 선택하세요.", L"Select an output folder to use custom output."),
+                        UiText(L"알림", L"Notice"), MB_OK | MB_ICONWARNING);
                     g_isConverting.store(false);
-                    SetConvertButtonText(hwnd, L"변환 시작");
+                    SetConvertButtonText(hwnd, UiText(L"변환 시작", L"Start conversion"));
                     break;
                 }
 
@@ -2297,7 +2365,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hListView, NULL, FALSE);
             } else if (LOWORD(wParam) == ID_BTN_DEL) {
                 if (g_isConverting.load()) {
-                    MessageBoxW(hwnd, L"변환 중에는 삭제할 수 없습니다.", L"알림", MB_OK | MB_ICONWARNING);
+                    MessageBoxW(hwnd,
+                        UiText(L"변환 중에는 삭제할 수 없습니다.", L"Cannot delete while conversion is running."),
+                        UiText(L"알림", L"Notice"), MB_OK | MB_ICONWARNING);
                     break;
                 }
                 std::vector<FileItem> new_items;
@@ -2322,7 +2392,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hListView, NULL, FALSE);
             } else if (LOWORD(wParam) == ID_BTN_SAVE_SETTINGS) {
                 SaveSettings(hwnd);
-                MessageBoxW(hwnd, L"설정이 저장되었습니다.", L"알림", MB_OK | MB_ICONINFORMATION);
+                MessageBoxW(hwnd,
+                    UiText(L"설정이 저장되었습니다. 언어 변경은 재시작 후 적용됩니다.", L"Settings saved. Language changes apply after restart."),
+                    UiText(L"알림", L"Notice"), MB_OK | MB_ICONINFORMATION);
             } else if (LOWORD(wParam) == ID_BTN_DEL_COMPLETED || LOWORD(wParam) == ID_BTN_DEL_FAILED) {
                 const bool removeCompleted = LOWORD(wParam) == ID_BTN_DEL_COMPLETED;
                 const bool removeFailed = LOWORD(wParam) == ID_BTN_DEL_FAILED;
@@ -2334,7 +2406,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (removeFailed) {
                         g_pendingDeleteFailed.store(true);
                     }
-                    MessageBoxW(hwnd, L"변환 중에는 목록 삭제를 예약합니다. 현재 작업 완료 후 자동으로 삭제됩니다.", L"안내", MB_OK | MB_ICONINFORMATION);
+                    MessageBoxW(hwnd,
+                        UiText(L"변환 중에는 목록 삭제를 예약합니다. 현재 작업 완료 후 자동으로 삭제됩니다.", L"Deletion is queued while converting. It will run after current work completes."),
+                        UiText(L"안내", L"Info"), MB_OK | MB_ICONINFORMATION);
                     break;
                 }
                 PostMessageW(hwnd, WM_APP_DELETE_STATUS, removeCompleted ? 1 : 0, removeFailed ? 1 : 0);
@@ -2481,7 +2555,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     RECT rc = { 0, 0, 780, 650 };
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, FALSE);
     
-    HWND hwnd = CreateWindowExW(0, WND_CLASS, L"AVIF-Master", WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
+    HWND hwnd = CreateWindowExW(0, WND_CLASS, UiText(L"AVIF-Master", L"AVIF-Master"), WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, hInstance, NULL);
         
     ShowWindow(hwnd, nCmdShow);
